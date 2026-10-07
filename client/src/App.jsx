@@ -9,6 +9,13 @@ const roleLabels = {
   manager: 'مدير'
 };
 
+const happyStatus = {
+  pending: 'قيد المراجعة',
+  interview: 'تمت المقابلة',
+  accepted: 'مقبول',
+  rejected: 'مرفوض'
+};
+
 const provinces = [
   'القاهرة', 'الجيزة', 'الإسكندرية', 'المنوفية', 'الشرقية', 'القليوبية', 'الدقهلية', 'كفر الشيخ',
   'البحيرة', 'الغربية', 'المنيا', 'بني سويف', 'الفيوم', 'أسيوط', 'سوهاج', 'قنا', 'الأقصر', 'أسوان',
@@ -24,13 +31,32 @@ const defaultJob = {
   closingDate: ''
 };
 
+const emptyApplicationForm = {
+  fullName: '',
+  nationalId: '',
+  mobile: '',
+  address: '',
+  province: 'القاهرة',
+  email: '',
+  cvUrl: '',
+  notes: ''
+};
+
 function App() {
   const [mode, setMode] = useState('login');
   const [token, setToken] = useState(localStorage.getItem('tamweely_token') || '');
-  const [user, setUser] = useState(JSON.parse(localStorage.getItem('tamweely_user') || 'null'));
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('tamweely_user') || 'null');
+    } catch {
+      return null;
+    }
+  });
   const [jobs, setJobs] = useState([]);
   const [applications, setApplications] = useState([]);
   const [dashboard, setDashboard] = useState(null);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [applicationForm, setApplicationForm] = useState(emptyApplicationForm);
   const [loginForm, setLoginForm] = useState({ email: 'admin@tamweely.com', password: '123456' });
   const [registerForm, setRegisterForm] = useState({
     fullName: '',
@@ -137,18 +163,28 @@ function App() {
     }
   };
 
-  const submitApplication = async (jobId) => {
+  const submitApplication = async (e) => {
+    e.preventDefault();
+    if (!selectedJob) return;
+
     try {
       await fetchJson('/api/applications', {
         method: 'POST',
         body: JSON.stringify({
-          jobId,
-          cvUrl: 'https://example.com/cv.pdf',
-          notes: 'أرغب في التقديم على هذه الوظيفة',
-          province: user.province
+          jobId: selectedJob.id,
+          province: applicationForm.province || user.province,
+          cvUrl: applicationForm.cvUrl || 'https://example.com/cv.pdf',
+          notes: applicationForm.notes,
+          fullName: applicationForm.fullName || user.fullName,
+          nationalId: applicationForm.nationalId || user.nationalId,
+          mobile: applicationForm.mobile || user.mobile,
+          address: applicationForm.address || user.address,
+          email: applicationForm.email || user.email
         })
       });
-      setMessage('تم إرسال الطلب بنجاح');
+      setMessage('تم إرسال الطلب بنجاح، وسيصلك تأكيد قريبًا');
+      setSelectedJob(null);
+      setApplicationForm(emptyApplicationForm);
       loadData();
     } catch (error) {
       setMessage(error.message);
@@ -176,100 +212,146 @@ function App() {
     setJobs([]);
     setApplications([]);
     setDashboard(null);
+    setSelectedJob(null);
   };
 
-  const roleView = useMemo(() => {
+  const applicantCards = useMemo(() => {
+    if (!applications.length) return [];
+    return [
+      { title: 'إجمالي الطلبات', value: applications.length },
+      { title: 'قيد المراجعة', value: applications.filter((a) => a.status === 'pending').length },
+      { title: 'تمت المقابلة', value: applications.filter((a) => a.status === 'interview').length },
+      { title: 'مقبول', value: applications.filter((a) => a.status === 'accepted').length }
+    ];
+  }, [applications]);
+
+  const viewer = useMemo(() => {
     if (!user) return null;
 
-    switch (user.role) {
-      case 'applicant':
-        return (
-          <div>
-            <div className="cards">
-              <div className="card">
-                <h3>إجمالي الطلبات</h3>
-                <div className="stats">{applications.length}</div>
+    if (user.role === 'applicant') {
+      return (
+        <div>
+          <div className="cards">
+            {applicantCards.map((card) => (
+              <div className="card" key={card.title}>
+                <h3>{card.title}</h3>
+                <div className="stats">{card.value}</div>
               </div>
-              <div className="card">
-                <h3>قيد المراجعة</h3>
-                <div className="stats">{applications.filter((a) => a.status === 'pending').length}</div>
-              </div>
-              <div className="card">
-                <h3>تمت المقابلة</h3>
-                <div className="stats">{applications.filter((a) => a.status === 'interview').length}</div>
-              </div>
-            </div>
+            ))}
+          </div>
 
-            <div className="job-grid">
-              {jobs.map((job) => (
-                <div className="job-card" key={job.id}>
-                  <h3>{job.title}</h3>
-                  <div className="meta">{job.province} • {job.type === 'full_time' ? 'دوام كامل' : job.type}</div>
-                  <p>{job.description}</p>
-                  <div className="tags">
-                    {job.requirements?.map((r) => <span className="tag" key={r}>{r}</span>)}
+          <div className="area-title">الوظائف المتاحة</div>
+          <div className="job-grid">
+            {jobs.map((job) => (
+              <article className="job-card" key={job.id}>
+                <div className="job-head">
+                  <div>
+                    <h3>{job.title}</h3>
+                    <div className="meta">{job.province} • {job.type === 'full_time' ? 'دوام كامل' : job.type}</div>
                   </div>
-                  <div style={{ marginTop: 12 }}>
-                    <button className="button primary" onClick={() => submitApplication(job.id)}>قدّم الآن</button>
-                  </div>
+                  <span className="status-pill open">مفتوح</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        );
 
-      case 'recruitment_specialist':
-        return (
-          <div>
-            <div className="cards">
-              <div className="card"><h3>طلبات المحافظة</h3><div className="stats">{applications.filter((a) => a.province === user.province).length}</div></div>
-              <div className="card"><h3>قيد المراجعة</h3><div className="stats">{applications.filter((a) => a.province === user.province && a.status === 'pending').length}</div></div>
-              <div className="card"><h3>للمقابلة</h3><div className="stats">{applications.filter((a) => a.province === user.province && a.status === 'interview').length}</div></div>
-            </div>
+                <p>{job.description}</p>
 
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>المتقدم</th>
-                    <th>الوظيفة</th>
-                    <th>الحالة</th>
-                    <th>إجراء</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {applications.filter((a) => a.province === user.province).map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.applicantId}</td>
-                      <td>{item.jobTitle}</td>
-                      <td><span className={`badge ${item.status}`}>{item.status}</span></td>
-                      <td>
-                        <button className="button secondary" onClick={() => updateAppStatus(item.id, 'interview')}>تحديد مقابلة</button>
-                        <button className="button primary" style={{ marginRight: 8 }} onClick={() => updateAppStatus(item.id, 'accepted')}>قبول</button>
-                        <button className="button" style={{ marginRight: 8, background: '#fee2e2', color: '#b91c1c' }} onClick={() => updateAppStatus(item.id, 'rejected')}>رفض</button>
-                      </td>
-                    </tr>
+                <div className="tags">
+                  {(job.requirements || []).map((req) => (
+                    <span className="tag" key={req}>{req}</span>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
+
+                <div className="job-actions">
+                  <button className="button primary" onClick={() => setSelectedJob(job)}>عرض التفاصيل</button>
+                </div>
+              </article>
+            ))}
           </div>
-        );
 
-      case 'supervisor':
-      case 'manager':
-        return (
-          <div>
-            <div className="cards">
-              <div className="card"><h3>إجمالي المتقدمين</h3><div className="stats">{dashboard?.totalApplicants || 0}</div></div>
-              <div className="card"><h3>الوظائف المفتوحة</h3><div className="stats">{dashboard?.openJobs || 0}</div></div>
-              <div className="card"><h3>الطلبات</h3><div className="stats">{dashboard?.totalApplications || 0}</div></div>
-            </div>
+          <div className="table-wrap" style={{ marginTop: 30 }}>
+            <div className="area-title">طلباتك</div>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>الوظيفة</th>
+                  <th>الحالة</th>
+                  <th>سبب الرفض</th>
+                  <th>تاريخ الإرسال</th>
+                </tr>
+              </thead>
+              <tbody>
+                {applications.length ? applications.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.jobTitle}</td>
+                    <td><span className={`badge ${item.status}`}>{happyStatus[item.status] || item.status}</span></td>
+                    <td>{item.rejectionReason || '—'}</td>
+                    <td>{new Date(item.submittedAt).toLocaleDateString('ar-EG')}</td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan="4">لا توجد طلبات بعد</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
 
+    if (user.role === 'recruitment_specialist') {
+      const provinceApps = applications.filter((app) => app.province === user.province);
+      return (
+        <div>
+          <div className="cards">
+            <div className="card"><h3>عدد المتقدمين</h3><div className="stats">{provinceApps.length}</div></div>
+            <div className="card"><h3>قيد المراجعة</h3><div className="stats">{provinceApps.filter((a) => a.status === 'pending').length}</div></div>
+            <div className="card"><h3>مقبول</h3><div className="stats">{provinceApps.filter((a) => a.status === 'accepted').length}</div></div>
+          </div>
+
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>الاسم</th>
+                  <th>الوظيفة</th>
+                  <th>المحافظة</th>
+                  <th>الحالة</th>
+                  <th>إجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {provinceApps.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.fullName || item.applicantId}</td>
+                    <td>{item.jobTitle}</td>
+                    <td>{item.province}</td>
+                    <td><span className={`badge ${item.status}`}>{happyStatus[item.status] || item.status}</span></td>
+                    <td>
+                      <button className="button secondary" onClick={() => updateAppStatus(item.id, 'interview')}>مقابلة</button>
+                      <button className="button primary" onClick={() => updateAppStatus(item.id, 'accepted')} style={{ marginRight: 8 }}>قبول</button>
+                      <button className="button danger" onClick={() => updateAppStatus(item.id, 'rejected')} style={{ marginRight: 8 }}>رفض</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    if (user.role === 'supervisor' || user.role === 'manager') {
+      return (
+        <div>
+          <div className="cards">
+            <div className="card"><h3>إجمالي المتقدمين</h3><div className="stats">{dashboard?.totalApplicants || 0}</div></div>
+            <div className="card"><h3>الوظائف المفتوحة</h3><div className="stats">{dashboard?.openJobs || 0}</div></div>
+            <div className="card"><h3>إجمالي الطلبات</h3><div className="stats">{dashboard?.totalApplications || 0}</div></div>
+          </div>
+
+          {user.role === 'manager' && (
             <div className="card" style={{ marginBottom: 20 }}>
               <h3>إضافة وظيفة جديدة</h3>
               <form className="form-grid" onSubmit={addJob}>
-                <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+                <div className="form-grid split-2">
                   <input className="input" value={jobForm.title} onChange={(e) => setJobForm({ ...jobForm, title: e.target.value })} placeholder="عنوان الوظيفة" />
                   <select className="select" value={jobForm.province} onChange={(e) => setJobForm({ ...jobForm, province: e.target.value })}>
                     {provinces.map((province) => <option key={province}>{province}</option>)}
@@ -280,36 +362,36 @@ function App() {
                 <button className="button primary">حفظ الوظيفة</button>
               </form>
             </div>
+          )}
 
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>رقم الطلب</th>
-                    <th>الوظيفة</th>
-                    <th>المحافظة</th>
-                    <th>الحالة</th>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>رقم الطلب</th>
+                  <th>الوظيفة</th>
+                  <th>المحافظة</th>
+                  <th>الحالة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {applications.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.id.slice(0, 8)}</td>
+                    <td>{item.jobTitle}</td>
+                    <td>{item.province}</td>
+                    <td><span className={`badge ${item.status}`}>{happyStatus[item.status] || item.status}</span></td>
                   </tr>
-                </thead>
-                <tbody>
-                  {applications.map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.id}</td>
-                      <td>{item.jobTitle}</td>
-                      <td>{item.province}</td>
-                      <td><span className={`badge ${item.status}`}>{item.status}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
-        );
-
-      default:
-        return null;
+        </div>
+      );
     }
-  }, [applications, dashboard, jobs, user]);
+
+    return null;
+  }, [applications, applicantCards, dashboard, jobs, user, jobForm]);
 
   if (!token || !user) {
     return (
@@ -354,7 +436,7 @@ function App() {
             </form>
           )}
 
-          {message && <p style={{ marginTop: 16, color: '#0a1f3d', fontWeight: 600 }}>{message}</p>}
+          {message && <p className="note-box">{message}</p>}
         </div>
       </div>
     );
@@ -368,7 +450,7 @@ function App() {
           Tamweely
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="topbar-user">
           <span style={{ fontWeight: 700 }}>مرحباً {user.fullName}</span>
           <span className="badge pending" style={{ background: '#e0f2fe', color: '#0f172a' }}>{roleLabels[user.role]}</span>
           <button className="button secondary" onClick={logout}>تسجيل الخروج</button>
@@ -384,8 +466,42 @@ function App() {
           </div>
         )}
 
-        {roleView}
+        {viewer}
       </div>
+
+      {selectedJob && (
+        <div className="modal-backdrop" onClick={() => setSelectedJob(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>{selectedJob.title}</h2>
+              <button className="button secondary" onClick={() => setSelectedJob(null)}>إغلاق</button>
+            </div>
+
+            <p className="meta">{selectedJob.province} • {selectedJob.type === 'full_time' ? 'دوام كامل' : selectedJob.type}</p>
+            <p>{selectedJob.description}</p>
+
+            <form className="form-grid" onSubmit={submitApplication}>
+              <div className="split-2 form-grid">
+                <input className="input" placeholder="الاسم الكامل" value={applicationForm.fullName || user.fullName} onChange={(e) => setApplicationForm({ ...applicationForm, fullName: e.target.value })} />
+                <input className="input" placeholder="الرقم القومي" value={applicationForm.nationalId || user.nationalId} onChange={(e) => setApplicationForm({ ...applicationForm, nationalId: e.target.value })} />
+              </div>
+              <div className="split-2 form-grid">
+                <input className="input" placeholder="رقم الموبايل" value={applicationForm.mobile || user.mobile} onChange={(e) => setApplicationForm({ ...applicationForm, mobile: e.target.value })} />
+                <input className="input" placeholder="البريد الإلكتروني" value={applicationForm.email || user.email} onChange={(e) => setApplicationForm({ ...applicationForm, email: e.target.value })} />
+              </div>
+              <div className="split-2 form-grid">
+                <input className="input" placeholder="العنوان" value={applicationForm.address || user.address} onChange={(e) => setApplicationForm({ ...applicationForm, address: e.target.value })} />
+                <select className="select" value={applicationForm.province || user.province} onChange={(e) => setApplicationForm({ ...applicationForm, province: e.target.value })}>
+                  {provinces.map((province) => <option key={province}>{province}</option>)}
+                </select>
+              </div>
+              <input className="input" placeholder="رابط السيرة الذاتية (اختياري)" value={applicationForm.cvUrl} onChange={(e) => setApplicationForm({ ...applicationForm, cvUrl: e.target.value })} />
+              <textarea className="textarea" rows={4} placeholder="ملاحظات إضافية" value={applicationForm.notes} onChange={(e) => setApplicationForm({ ...applicationForm, notes: e.target.value })} />
+              <button className="button primary">إرسال الطلب</button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
